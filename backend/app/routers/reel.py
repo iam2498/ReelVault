@@ -21,14 +21,11 @@ def download_reel(url: ReelRequest):
 
         # Download Reel
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-
             info = ydl.extract_info(
                 str(url.url),
                 download=True
             )
-
             filename = ydl.prepare_filename(info)
-
         print("Downloaded:", filename)
 
         # Create MongoDB document
@@ -38,14 +35,11 @@ def download_reel(url: ReelRequest):
             "thumbnail": info.get("thumbnail"),
             "filename": filename
         }
-
         print("MongoDB document:", reel_doc)
 
         # Save to MongoDB (only once)
         result = reels_collection.insert_one(reel_doc)
-
         print("MongoDB ID:", result.inserted_id)
-
         reel_doc["_id"] = str(result.inserted_id)
 
         return {
@@ -55,7 +49,5 @@ def download_reel(url: ReelRequest):
         }
 
     except Exception as e:
-
         print("ERROR:", repr(e))
-
         raise HTTPException(status_code=500, detail=str(e))

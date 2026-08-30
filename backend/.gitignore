@@ -7,7 +7,9 @@ venv/
 
 .env
 
-backend/downloads/
+downloads/
+audio/
+chroma_db/
 
 .vscode/
 .idea/
