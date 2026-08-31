@@ -2,10 +2,9 @@ from fastapi import APIRouter, HTTPException
 import subprocess
 from uuid import uuid4
 from pathlib import Path
-from ..schemas.model import ExtractAudioRequest,TranscribeRequest
+from ..schemas.model import ExtractAudioRequest
 
 from app.schemas.model import (
-    IndexRequest,
     SearchRequest
 )
 
@@ -18,10 +17,16 @@ from app.rag.rag import (
 
 from faster_whisper import WhisperModel
 
+model = WhisperModel(
+    "base",
+    device="cpu",
+    compute_type="int8"
+)
+
 router = APIRouter()
 
-@router.post("/extract-audio")
-def extract_audio(payload: ExtractAudioRequest):
+@router.post("/Process-audio")
+def Process_audio(payload: ExtractAudioRequest):
 
     audio_dir = Path("audio")
     audio_dir.mkdir(exist_ok=True)
@@ -47,44 +52,26 @@ def extract_audio(payload: ExtractAudioRequest):
             detail="Audio extraction failed"
         )
 
-    return {
-        "message": "Audio extracted successfully",
-        "audio_file": audio_path
-    }
+    # Whisper Model for Transcribe
 
-model = WhisperModel(
-    "base",
-    device="cpu",
-    compute_type="int8"
-)
-
-@router.post("/transcribe")
-def transcribe(payload: TranscribeRequest):
-
-    audio_file = Path(payload.audio_path)
+    audio_file = Path(str(audio_path))
 
     if not audio_file.is_file():
-        raise HTTPException(status_code=400, detail="audio_path does not exist")
-
+            raise HTTPException(status_code=400, detail="audio_path does not exist")
+    
     segments, info = model.transcribe(str(audio_file), language="en")
     segments = list(segments)
-
+    
     text = " ".join(seg.text.strip() for seg in segments)
-
+    
     for segment in segments:
         print(segment.text.strip())
 
-    return {
-        "language": info.language,
-        "text": text
-    }
-
-@router.post("/index")
-def index_video(request: IndexRequest):
+    # Convert Transcribe To Embedding and Store in ChromaDB
 
     chunks = get_chunks(
-        request.text,
-        request.video_id
+        text,
+        payload.video_id
     )
 
     embeddings = create_embeddings(chunks)
@@ -95,8 +82,13 @@ def index_video(request: IndexRequest):
     )
 
     return {
-        "message": "Video indexed successfully",
-        "video_id": request.video_id,
+        "message_1": "Audio extracted successfully",
+        "audio_file": audio_path,
+        "message_2": "Audio Transcribe Successfully",
+        "language": info.language,
+        "text": text,
+        "message_3": "Video indexed successfully",
+        "video_id": payload.video_id,
         "chunks_created": len(chunks)
     }
 
