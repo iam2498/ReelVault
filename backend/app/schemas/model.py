@@ -1,5 +1,8 @@
 from pydantic import BaseModel
 
+class ExtractImageRequest(BaseModel):
+    video_path: str
+
 class ExtractAudioRequest(BaseModel):
     video_path: str
     video_id: str
