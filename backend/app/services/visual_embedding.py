@@ -28,17 +28,28 @@ class VisualEmbedding:
         inputs = self.processor(
             images=image,
             return_tensors="pt"
-        ).to(self.device)
+        )
 
-        with torch.no_grad():
+        inputs = {
+            key: value.to(self.device)
+            for key, value in inputs.items()
+        }
+
+        with torch.inference_mode():
 
             image_features = self.model.get_image_features(
                 **inputs
             )
 
-        image_features = image_features / image_features.norm(
-            dim=-1,
-            keepdim=True
+        # Get actual tensor from model output
+        if hasattr(image_features, "pooler_output"):
+            image_features = image_features.pooler_output
+
+        # Normalize embedding
+        image_features = torch.nn.functional.normalize(
+            image_features,
+            p=2,
+            dim=-1
         )
 
         return image_features[0].cpu().numpy().tolist()
