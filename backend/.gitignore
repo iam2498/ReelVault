@@ -9,6 +9,7 @@ venv/
 
 downloads/
 audio/
+frames/
 chroma_db/
 
 .vscode/
