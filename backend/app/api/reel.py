@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
-from ..schemas.ReelRequest import ReelRequest
+from app.schemas.reel import ReelRequest
 import yt_dlp
 from pathlib import Path
-from ..database.db import reels_collection
+from app.database.db import reels_collection
 
 router = APIRouter()
 

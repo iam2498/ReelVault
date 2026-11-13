@@ -1,0 +1,16 @@
+# ReelVault Backend Dependencies
+fastapi==0.138.1
+uvicorn==0.49.0
+pydantic==2.13.4
+pymongo==4.13.2
+yt-dlp==2026.7.4
+faster-whisper==1.2.1
+sentence-transformers==5.5.1
+chromadb==1.5.9
+langchain-text-splitters==1.1.2
+torch==2.14.0
+torchvision==0.29.0
+transformers==5.12.0
+easyocr==1.7.2
+pillow==12.2.0
+

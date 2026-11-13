@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from ..services.visual_embedding import VisualEmbedding
-from ..services.ocr_service import OCRService
+from app.services.visual_embedding import VisualEmbedding
+from app.services.ocr_service import OCRService
 
 from pathlib import Path
 

@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from .routers import reel,audio,frames,vision
+from app.api import audio, frames, reel, vision
 
 app = FastAPI()
 

@@ -1,12 +1,8 @@
 from fastapi import APIRouter
 from uuid import uuid4
-from ..schemas.model import ExtractAudioRequest
-from ..services.ExtractAudio import extract_audio
-from ..services.Transcribe import transcribe
-
-from app.schemas.model import (
-    SearchRequest
-)
+from app.schemas.model import ExtractAudioRequest, SearchRequest
+from app.services.extract_audio import extract_audio
+from app.services.transcribe import transcribe
 
 from app.rag.rag import (
     get_chunks,

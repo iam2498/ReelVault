@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pathlib import Path
 from uuid import uuid4
-from ..schemas.model import ExtractImageRequest
+from app.schemas.model import ExtractImageRequest
 import subprocess
 
 router = APIRouter()
