@@ -1,354 +1,345 @@
-import React, { useState } from 'react';
-import './App.css';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import Header from './components/Header';
+import AddReelForm from './components/AddReelForm';
+import CollectionsBar from './components/CollectionsBar';
+import ReelGrid from './components/ReelGrid';
+import DeleteConfirmModal from './components/DeleteConfirmModal';
+import ReelDetailModal from './components/ReelDetailModal';
+import Footer from './components/Footer';
+import { fetchLibrary, processReel, searchReels, deleteReel } from './api';
+import {
+  DEFAULT_COLLECTIONS,
+  loadStoredCollections,
+  saveStoredCollections,
+  loadStoredReelCollections,
+  saveStoredReelCollections,
+} from './utils';
 
-function App() {
-  // 1. Download Reel States
-  const [reelUrl, setReelUrl] = useState('');
-  const [downloadResult, setDownloadResult] = useState(null);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState('');
-
-  // 2. Audio Processing States
-  const [audioVideoPath, setAudioVideoPath] = useState('');
-  const [audioVideoId, setAudioVideoId] = useState('');
-  const [audioResult, setAudioResult] = useState(null);
-  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
-  const [audioError, setAudioError] = useState('');
-
-  // 3. Search States
-  const [searchQuery, setSearchQuery] = useState('');
-  const [topK, setTopK] = useState(3);
+export default function App() {
+  const [libraryReels, setLibraryReels] = useState([]);
   const [searchResults, setSearchResults] = useState(null);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchError, setSearchError] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [toastTimer, setToastTimer] = useState(null);
 
-  // 4. Frames Extraction States
-  const [framesVideoPath, setFramesVideoPath] = useState('');
-  const [framesResult, setFramesResult] = useState(null);
-  const [isExtractingFrames, setIsExtractingFrames] = useState(false);
-  const [framesError, setFramesError] = useState('');
+  // Selected reel for expanded detail view
+  const [selectedReel, setSelectedReel] = useState(null);
 
-  // 5. Vision / OCR States
-  const [visionResult, setVisionResult] = useState(null);
-  const [isProcessingVision, setIsProcessingVision] = useState(false);
-  const [visionError, setVisionError] = useState('');
+  // Delete modal state
+  const [reelToDelete, setReelToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  // Handlers
-  const handleDownload = async (e) => {
-    e.preventDefault();
-    setIsDownloading(true);
-    setDownloadError('');
-    setDownloadResult(null);
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
 
+  // Collections state
+  const [customCollections, setCustomCollections] = useState(() => loadStoredCollections());
+  const [activeCollection, setActiveCollection] = useState('all');
+  const [reelCollectionsMap, setReelCollectionsMap] = useState(() => loadStoredReelCollections());
+
+  const searchAbortRef = useRef(null);
+
+  // All collections combined
+  const allCollections = useMemo(() => {
+    return [...DEFAULT_COLLECTIONS, ...customCollections];
+  }, [customCollections]);
+
+  // Load Library on initial mount
+  const loadLibrary = useCallback(async () => {
     try {
-      const response = await fetch('/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: reelUrl }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || 'Download failed');
-      }
-      setDownloadResult(data);
+      const data = await fetchLibrary();
+      const reels = data.reels || [];
+      setLibraryReels(reels);
 
-      // Auto fill video path and ID into the next sections
-      if (data.data?.filename) {
-        setAudioVideoPath(data.data.filename);
-        setFramesVideoPath(data.data.filename);
-      }
-      if (data.id) {
-        setAudioVideoId(data.id);
-      }
+      // Prune any deleted/orphaned IDs from localStorage collection map
+      const validIds = new Set(reels.map((r) => r.id || r._id));
+      setReelCollectionsMap((prev) => {
+        let changed = false;
+        const cleaned = {};
+        for (const [id, col] of Object.entries(prev)) {
+          if (validIds.has(id)) {
+            cleaned[id] = col;
+          } else {
+            changed = true;
+          }
+        }
+        if (changed) {
+          saveStoredReelCollections(cleaned);
+          return cleaned;
+        }
+        return prev;
+      });
     } catch (err) {
-      setDownloadError(err.message);
+      console.error('Failed to load library:', err);
     } finally {
-      setIsDownloading(false);
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadLibrary();
+  }, [loadLibrary]);
+
+  // Polling for processing reels: if any reel is 'processing', poll every 3 seconds
+  useEffect(() => {
+    const hasProcessing = libraryReels.some((r) => r.status === 'processing');
+    if (!hasProcessing) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const data = await fetchLibrary();
+        const updated = data.reels || [];
+        setLibraryReels(updated);
+
+        // If the selected modal reel was processing, update it too
+        if (selectedReel && selectedReel.status === 'processing') {
+          const fresh = updated.find(
+            (r) => (r.id || r._id) === (selectedReel.id || selectedReel._id)
+          );
+          if (fresh) setSelectedReel(fresh);
+        }
+      } catch (err) {
+        console.error('Polling error:', err);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [libraryReels, selectedReel]);
+
+  // Toast helper
+  const showToast = (type, message) => {
+    if (toastTimer) {
+      clearTimeout(toastTimer);
+    }
+    setToast({ type, message });
+    const timer = setTimeout(() => {
+      setToast(null);
+    }, 3500);
+    setToastTimer(timer);
+  };
+
+  // Debounced search logic
+  useEffect(() => {
+    const query = searchQuery.trim();
+
+    if (query.length < 2) {
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
+      }
+      setSearchResults(null);
+      return;
+    }
+
+    const handler = setTimeout(async () => {
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
+
+      try {
+        const data = await searchReels(query, 12, controller.signal);
+        setSearchResults(data.results || []);
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error('Search request error:', err);
+          setSearchResults([]);
+          showToast('error', 'Search failed. Please try again.');
+        }
+      }
+    }, 400);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [searchQuery]);
+
+  // Handle Save Reel
+  const handleSaveReel = async (url, onSuccess) => {
+    setIsSaving(true);
+    try {
+      const data = await processReel(url);
+      const newId = data.video_id || data.id;
+
+      // Assign active collection if not 'all'
+      if (activeCollection && activeCollection.toLowerCase() !== 'all' && newId) {
+        setReelCollectionsMap((prev) => {
+          const updated = { ...prev, [newId]: activeCollection };
+          saveStoredReelCollections(updated);
+          return updated;
+        });
+      }
+
+      onSuccess();
+      showToast(
+        'success',
+        data.status === 'completed'
+          ? 'Reel saved and summarized successfully!'
+          : 'Reel added! Analyzing scenes & transcribing in background...'
+      );
+      await loadLibrary();
+    } catch (err) {
+      console.error('Save error:', err);
+      showToast(
+        'error',
+        err.message || 'Could not save this reel. Please check the link and try again.'
+      );
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const handleProcessAudio = async (e) => {
-    e.preventDefault();
-    setIsProcessingAudio(true);
-    setAudioError('');
-    setAudioResult(null);
+  // Handle Reel Selection for detail view
+  const handleSelectReel = (reel) => {
+    setSelectedReel(reel);
+  };
 
+  // Handle Delete Reel
+  const handleRequestDelete = (reel) => {
+    setReelToDelete(reel);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!reelToDelete) return;
+    const targetId = reelToDelete.id || reelToDelete._id;
+    if (!targetId) return;
+
+    setIsDeleting(true);
     try {
-      const response = await fetch('/Process-audio', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          video_path: audioVideoPath,
-          video_id: audioVideoId,
-        }),
+      await deleteReel(targetId);
+
+      // Remove from library and search lists
+      setLibraryReels((prev) =>
+        prev.filter((r) => (r.id || r._id) !== targetId)
+      );
+      setSearchResults((prev) =>
+        prev ? prev.filter((r) => (r.id || r._id) !== targetId) : null
+      );
+
+      // Clean up localStorage collection map
+      setReelCollectionsMap((prev) => {
+        if (!prev[targetId]) return prev;
+        const updated = { ...prev };
+        delete updated[targetId];
+        saveStoredReelCollections(updated);
+        return updated;
       });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || 'Audio processing failed');
+
+      // If the deleted reel was open in the details view, close it
+      if (
+        selectedReel &&
+        (selectedReel.id === targetId || selectedReel._id === targetId)
+      ) {
+        setSelectedReel(null);
       }
-      setAudioResult(data);
+
+      showToast('success', 'Reel and all associated files deleted successfully!');
+      setReelToDelete(null);
     } catch (err) {
-      setAudioError(err.message);
+      console.error('Delete error:', err);
+      showToast(
+        'error',
+        err.message || 'Failed to delete reel. Please try again.'
+      );
     } finally {
-      setIsProcessingAudio(false);
+      setIsDeleting(false);
     }
   };
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    setIsSearching(true);
-    setSearchError('');
-    setSearchResults(null);
-
-    try {
-      const response = await fetch('/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: searchQuery,
-          top_k: Number(topK),
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || 'Search failed');
-      }
-      setSearchResults(data);
-    } catch (err) {
-      setSearchError(err.message);
-    } finally {
-      setIsSearching(false);
+  // Handle Create Collection
+  const handleCreateCollection = (name) => {
+    if (!name) return;
+    const exists = allCollections.some(
+      (c) => c.toLowerCase() === name.toLowerCase()
+    );
+    if (!exists) {
+      const updated = [...customCollections, name];
+      setCustomCollections(updated);
+      saveStoredCollections(updated);
     }
+    setActiveCollection(name);
   };
 
-  const handleExtractFrames = async (e) => {
-    e.preventDefault();
-    setIsExtractingFrames(true);
-    setFramesError('');
-    setFramesResult(null);
+  // Compute displayed reels
+  const activeList = searchResults !== null ? searchResults : libraryReels;
 
-    try {
-      const response = await fetch('/process-frames', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_path: framesVideoPath }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || 'Extracting frames failed');
-      }
-      setFramesResult(data);
-    } catch (err) {
-      setFramesError(err.message);
-    } finally {
-      setIsExtractingFrames(false);
+  // Enrich with stored collection assignments
+  const enrichedList = useMemo(() => {
+    return activeList.map((reel) => {
+      const id = reel.id || reel._id;
+      const assigned = reelCollectionsMap[id] || reel.collection || 'General';
+      return {
+        ...reel,
+        collection: assigned,
+      };
+    });
+  }, [activeList, reelCollectionsMap]);
+
+  // Filter by active collection
+  const filteredReels = useMemo(() => {
+    if (activeCollection.toLowerCase() === 'all') {
+      return enrichedList;
     }
-  };
-
-  const handleVisionFrames = async () => {
-    setIsProcessingVision(true);
-    setVisionError('');
-    setVisionResult(null);
-
-    try {
-      const response = await fetch('/Process-frames', {
-        method: 'POST',
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || 'Vision frames processing failed');
-      }
-      setVisionResult(data);
-    } catch (err) {
-      setVisionError(err.message);
-    } finally {
-      setIsProcessingVision(false);
-    }
-  };
+    return enrichedList.filter(
+      (reel) => (reel.collection || '').toLowerCase() === activeCollection.toLowerCase()
+    );
+  }, [enrichedList, activeCollection]);
 
   return (
-    <div className="container">
-      <header className="header">
-        <h1>🎬 ReelVault Testing UI</h1>
-        <p>Simple React frontend to test backend APIs</p>
-      </header>
+    <div className="min-h-screen flex flex-col antialiased text-zinc-900 bg-[#FAFAFA]">
+      {/* Header */}
+      <Header
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onSearchClear={() => setSearchQuery('')}
+      />
 
-      {/* 1. Download Reel */}
-      <section className="card">
-        <h2>1. Download Reel</h2>
-        <form onSubmit={handleDownload}>
-          <label>Instagram / Reel URL:</label>
-          <input
-            type="text"
-            placeholder="https://www.instagram.com/reel/..."
-            value={reelUrl}
-            onChange={(e) => setReelUrl(e.target.value)}
-            required
-          />
-          <button type="submit" disabled={isDownloading}>
-            {isDownloading ? 'Downloading Reel...' : 'Download Reel'}
-          </button>
-        </form>
+      {/* Main Content */}
+      <main className="flex-1 max-w-[1100px] w-full mx-auto px-6 py-10 flex flex-col gap-10">
+        <AddReelForm
+          onSave={handleSaveReel}
+          isSaving={isSaving}
+          toast={toast}
+        />
 
-        {downloadError && <p className="error">{downloadError}</p>}
-        {downloadResult && (
-          <div className="result-box">
-            <h4>Download Success!</h4>
-            <p><strong>Title:</strong> {downloadResult.data?.title}</p>
-            <p><strong>Database ID:</strong> {downloadResult.id}</p>
-            <p><strong>Saved File:</strong> {downloadResult.data?.filename}</p>
-            {downloadResult.data?.thumbnail && (
-              <img
-                src={downloadResult.data.thumbnail}
-                alt="Thumbnail"
-                className="thumbnail"
-              />
-            )}
-          </div>
-        )}
-      </section>
+        <CollectionsBar
+          collections={allCollections}
+          activeCollection={activeCollection}
+          onSelectCollection={setActiveCollection}
+          totalCount={libraryReels.length}
+          filteredCount={filteredReels.length}
+          isSearching={Boolean(searchQuery.trim())}
+          onCreateCollection={handleCreateCollection}
+        />
 
-      {/* 2. Process Audio & Transcribe */}
-      <section className="card">
-        <h2>2. Process Audio & Transcribe</h2>
-        <form onSubmit={handleProcessAudio}>
-          <label>Video File Path:</label>
-          <input
-            type="text"
-            placeholder="D:/28_Days_Plan/ReelVault/backend/downloads/video.mp4"
-            value={audioVideoPath}
-            onChange={(e) => setAudioVideoPath(e.target.value)}
-            required
-          />
+        <ReelGrid
+          reels={filteredReels}
+          isLoading={isLoading}
+          onReelClick={handleSelectReel}
+          onDelete={handleRequestDelete}
+        />
+      </main>
 
-          <label>Video ID:</label>
-          <input
-            type="text"
-            placeholder="video-id-123"
-            value={audioVideoId}
-            onChange={(e) => setAudioVideoId(e.target.value)}
-            required
-          />
+      {/* Expanded Detail Modal */}
+      <ReelDetailModal
+        isOpen={Boolean(selectedReel)}
+        reel={selectedReel}
+        onClose={() => setSelectedReel(null)}
+        onDelete={handleRequestDelete}
+      />
 
-          <button type="submit" disabled={isProcessingAudio}>
-            {isProcessingAudio ? 'Processing & Transcribing Audio...' : 'Process Audio'}
-          </button>
-        </form>
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={Boolean(reelToDelete)}
+        reel={reelToDelete}
+        onClose={() => setReelToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        isDeleting={isDeleting}
+      />
 
-        {audioError && <p className="error">{audioError}</p>}
-        {audioResult && (
-          <div className="result-box">
-            <h4>Audio Transcription Success!</h4>
-            <p><strong>Detected Language:</strong> {audioResult.language}</p>
-            <p><strong>Audio File:</strong> {audioResult.audio_file}</p>
-            <p><strong>Chunks Indexed:</strong> {audioResult.chunks_created}</p>
-            <p><strong>Transcribed Text:</strong></p>
-            <div className="text-box">{audioResult.text}</div>
-          </div>
-        )}
-      </section>
-
-      {/* 3. Semantic Search */}
-      <section className="card">
-        <h2>3. Semantic Search (ChromaDB)</h2>
-        <form onSubmit={handleSearch}>
-          <label>Search Query:</label>
-          <input
-            type="text"
-            placeholder="e.g. video about productivity or habits"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            required
-          />
-
-          <label>Top K Results:</label>
-          <input
-            type="number"
-            min="1"
-            max="10"
-            value={topK}
-            onChange={(e) => setTopK(e.target.value)}
-          />
-
-          <button type="submit" disabled={isSearching}>
-            {isSearching ? 'Searching...' : 'Search'}
-          </button>
-        </form>
-
-        {searchError && <p className="error">{searchError}</p>}
-        {searchResults && (
-          <div className="result-box">
-            <h4>Search Results for: "{searchResults.query}"</h4>
-            {searchResults.results && searchResults.results.length > 0 ? (
-              searchResults.results.map((item, index) => (
-                <div key={index} className="search-item">
-                  <p><strong>Result #{index + 1}</strong></p>
-                  <p><strong>Text:</strong> {item.text}</p>
-                  <p><small>Video ID: {item.video_id} | Distance: {item.distance}</small></p>
-                </div>
-              ))
-            ) : (
-              <p>No matching chunks found.</p>
-            )}
-          </div>
-        )}
-      </section>
-
-      {/* 4. Extract Frames */}
-      <section className="card">
-        <h2>4. Extract Frames (FFmpeg)</h2>
-        <form onSubmit={handleExtractFrames}>
-          <label>Video File Path:</label>
-          <input
-            type="text"
-            placeholder="D:/28_Days_Plan/ReelVault/backend/downloads/video.mp4"
-            value={framesVideoPath}
-            onChange={(e) => setFramesVideoPath(e.target.value)}
-            required
-          />
-          <button type="submit" disabled={isExtractingFrames}>
-            {isExtractingFrames ? 'Extracting Frames...' : 'Extract Frames'}
-          </button>
-        </form>
-
-        {framesError && <p className="error">{framesError}</p>}
-        {framesResult && (
-          <div className="result-box">
-            <h4>{framesResult.message}</h4>
-            <p><strong>Frames Folder:</strong> {framesResult.frames_path}</p>
-          </div>
-        )}
-      </section>
-
-      {/* 5. Process Frames (Vision & OCR) */}
-      <section className="card">
-        <h2>5. Process Frames (SigLIP & EasyOCR)</h2>
-        <p>Processes frames in the backend frames folder to generate embeddings and OCR text.</p>
-        <button onClick={handleVisionFrames} disabled={isProcessingVision}>
-          {isProcessingVision ? 'Running Vision Model & OCR...' : 'Run Vision & OCR'}
-        </button>
-
-        {visionError && <p className="error">{visionError}</p>}
-        {visionResult && (
-          <div className="result-box">
-            <h4>Total Frames Processed: {visionResult.total_frames}</h4>
-            {visionResult.frames && visionResult.frames.map((frame, index) => (
-              <div key={index} className="search-item">
-                <p><strong>Frame:</strong> {frame.filename}</p>
-                <p><strong>OCR Text:</strong> {frame.ocr_text || '(No text detected)'}</p>
-                {frame.embedding && (
-                  <p><small>Embedding Dimensions: {frame.embedding.length}</small></p>
-                )}
-                {frame.error && (
-                  <p className="error">Error: {frame.error}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      {/* Footer */}
+      <Footer />
     </div>
   );
 }
-
-export default App;

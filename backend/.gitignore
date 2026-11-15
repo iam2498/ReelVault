@@ -5,12 +5,30 @@ __pycache__/
 venv/
 .venv/
 
+# Environment variables & secrets (CRITICAL)
 .env
+.env.*
+!.env.example
 
+# Runtime & media storage (CRITICAL)
 downloads/
 audio/
 frames/
 chroma_db/
+temp/
+tmp/
+
+# Downloaded media files & databases
+*.mp4
+*.mp3
+*.wav
+*.m4a
+*.webm
+*.mov
+*.avi
+*.mkv
+*.sqlite3
+*.db
 
 .vscode/
 .idea/

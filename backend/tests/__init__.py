@@ -1,2 +1,0 @@
-"""ReelVault Backend Tests."""
-

@@ -1,7 +1,8 @@
-from sentence_transformers import SentenceTransformer
-import chromadb
+from pathlib import Path
 from uuid import uuid4
+import chromadb
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sentence_transformers import SentenceTransformer
 
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -23,16 +24,24 @@ def get_chunks(text: str, video_id: str):
     chunks = splitter.split_text(text)
     return [{"text": chunk, "video_id": video_id} for chunk in chunks]
 
-
 def create_embeddings(chunks):
+
+    if not chunks:
+        return []
+
     texts = [chunk["text"] for chunk in chunks]
     embeddings = embedding_model.encode(texts)
+
     return embeddings
 
 
-# Persistent so your vector store survives server restarts
-client = chromadb.PersistentClient(path="./chroma_db")
-collection = client.get_or_create_collection(name="reel")
+# Absolute path: persistent vector store in backend/chroma_db
+CHROMA_PATH = Path(__file__).resolve().parents[2] / "chroma_db"
+client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+collection = client.get_or_create_collection(
+    name="reel",
+    metadata={"hnsw:space": "cosine"},
+)
 
 
 def store_embeddings(chunks, embeddings):

@@ -1,31 +1,41 @@
-from fastapi import HTTPException
 from pathlib import Path
-from faster_whisper import WhisperModel
 
-model = WhisperModel(
-    "base",
-    device="cpu",
-    compute_type="int8"
-)
+_whisper_model = None
 
-def transcribe(audio_path):
 
-    # Whisper Model for Transcribe
+def get_whisper_model():
+    """Lazy-load the WhisperModel so imports and server startup are instant."""
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        # "small" gives good translation (Hindi/Gujarati/etc.) while running on CPU.
+        _whisper_model = WhisperModel(
+            "small",
+            device="cpu",
+            compute_type="int8",
+        )
+    return _whisper_model
+
+
+def transcribe(audio_path: str | Path | None) -> dict:
+    if not audio_path:
+        return {"language": "en", "text": ""}
 
     audio_file = Path(str(audio_path))
-
     if not audio_file.is_file():
-            raise HTTPException(status_code=400, detail="audio_path does not exist")
-    
-    segments, info = model.transcribe(str(audio_file), language="en")
-    segments = list(segments)
-    
-    text = " ".join(seg.text.strip() for seg in segments)
-    
-    for segment in segments:
-        print(segment.text.strip())
+        return {"language": "en", "text": ""}
 
-    return{
-        "language": info.language,
-        "text": text
+    model = get_whisper_model()
+    segments, info = model.transcribe(
+        str(audio_file),
+        task="translate",     # output is always English
+        beam_size=5,
+        vad_filter=True,      # ignore music/silence, avoids made-up text
+    )
+    segments = list(segments)
+    text = " ".join(seg.text.strip() for seg in segments).strip()
+
+    return {
+        "language": info.language if info else "en",
+        "text": text,
     }
